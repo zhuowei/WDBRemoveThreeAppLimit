@@ -435,7 +435,6 @@ struct installd_remove_app_limit_offsets {
   uint64_t offset_data_const_end_padding;
   // MIUninstallRecord::supportsSecureCoding
   uint64_t offset_return_true;
-  bool is_arm64e;
 };
 
 struct installd_remove_app_limit_offsets gAppLimitOffsets = {
@@ -443,59 +442,72 @@ struct installd_remove_app_limit_offsets gAppLimitOffsets = {
     .offset_objc_class_rw_t_MIInstallableBundle_baseMethods = 0x804e8,
     .offset_data_const_end_padding = 0x79c38,
     .offset_return_true = 0x19860,
-    .is_arm64e = true,
 };
 
-// 20 00 80 52 c0 03 5f d6
-
-#if 0
-
-static uint64_t patchfind_pointer_to_string2(void* executable_map, size_t executable_length,
-                                     const char* needle) {
-  char tmpbuf[strlen(needle) + 2];
-  tmpbuf[0] = 0;
-  strcpy(tmpbuf+1, needle);
-  void* str_offset = memmem(executable_map, executable_length, tmpbuf, strlen(needle) + 2);
+static uint64_t patchfind_find_class_rw_t_baseMethods(void* executable_map,
+                                                      size_t executable_length,
+                                                      const char* needle) {
+  void* str_offset = memmem(executable_map, executable_length, needle, strlen(needle) + 1);
   if (!str_offset) {
     return 0;
   }
   uint64_t str_file_offset = str_offset - executable_map;
-  str_file_offset += 1;
-  for (int i = 0; i < executable_length; i += 8) {
+  for (int i = 0; i < executable_length - 8; i += 8) {
     uint64_t val = *(uint64_t*)(executable_map + i);
-    if ((val & 0xfffffffful) == str_file_offset) {
-      return i;
+    if ((val & 0xfffffffful) != str_file_offset) {
+      continue;
+    }
+    // baseMethods
+    if (*(uint64_t*)(executable_map + i + 8) != 0) {
+      return i + 8;
     }
   }
   return 0;
 }
 
+static uint64_t patchfind_return_true(void* executable_map, size_t executable_length) {
+  // mov w0, #1
+  // ret
+  static const char needle[] = {0x20, 0x00, 0x80, 0x52, 0xc0, 0x03, 0x5f, 0xd6};
+  void* offset = memmem(executable_map, executable_length, needle, sizeof(needle));
+  if (!offset) {
+    return 0;
+  }
+  return offset - executable_map;
+}
+
 static bool patchfind_installd(void* executable_map, size_t executable_length,
-               struct installd_remove_app_limit_offsets* offsets) {
-  if ((offsets->offset_PTR_s_performVerificationWithError =
-           patchfind_pointer_to_string2(executable_map, executable_length, "performVerificationWithError:")) == 0) {
-    printf("no performVerificationWithError: selector\n");
+                               struct installd_remove_app_limit_offsets* offsets) {
+  struct segment_command_64* data_const_segment = nil;
+  struct symtab_command* symtab_command = nil;
+  struct dysymtab_command* dysymtab_command = nil;
+  if (!patchfind_sections(executable_map, &data_const_segment, &symtab_command,
+                          &dysymtab_command)) {
+    printf("no sections\n");
     return false;
   }
-  if ((offsets->offset_PTR_s_isPlaceholderInstall =
-           patchfind_pointer_to_string2(executable_map, executable_length, "isPlaceholderInstall")) == 0) {
-    printf("no isPlaceholderInstall selector\n");
+  if ((offsets->offset_data_const_end_padding = patchfind_get_padding(data_const_segment)) == 0) {
+    printf("no padding\n");
     return false;
   }
-  if ((offsets->offset_PTR_s__onQueue_addReferenceForApplication =
-           patchfind_pointer_to_string2(executable_map, executable_length, "_onQueue_addReferenceForApplicationIdentifier:bundle:error:")) == 0) {
-    printf("no _onQueue_addReferenceForApplicationIdentifier:bundle:error: selector\n");
+  if ((offsets->offset_objc_class_rw_t_MIInstallableBundle_baseMethods =
+           patchfind_find_class_rw_t_baseMethods(executable_map, executable_length,
+                                                 "MIInstallableBundle")) == 0) {
+    printf("no MIInstallableBundle class_rw_t\n");
     return false;
   }
-  if ((offsets->offset_ptr_str_class =
-           patchfind_pointer_to_string2(executable_map, executable_length, "class")) == 0) {
-    printf("no class selector\n");
+  offsets->offset_objc_method_list_t_MIInstallableBundle =
+      (*(uint64_t*)(executable_map +
+                    offsets->offset_objc_class_rw_t_MIInstallableBundle_baseMethods)) &
+      0xffffffull;
+
+  if ((offsets->offset_return_true = patchfind_return_true(executable_map, executable_length)) ==
+      0) {
+    printf("no return true\n");
     return false;
   }
   return true;
 }
-
-#endif
 
 struct objc_method {
   int32_t name;
@@ -540,29 +552,13 @@ static void patch_copy_objc_method_list(void* mutableBytes, uint64_t old_offset,
 };
 
 static NSData* make_patch_installd(void* executableMap, size_t executableLength) {
-  struct installd_remove_app_limit_offsets offsets = gAppLimitOffsets;
-#if 0
+  struct installd_remove_app_limit_offsets offsets = {};
   if (!patchfind_installd(executableMap, executableLength, &offsets)) {
     return nil;
   }
-#endif
 
   NSMutableData* data = [NSMutableData dataWithBytes:executableMap length:executableLength];
   char* mutableBytes = data.mutableBytes;
-#if 0
-  {
-    *((uint64_t*)(mutableBytes +
-                  offsets.offset_PTR_s_performVerificationWithError)) =
-    *((uint64_t*)(mutableBytes +
-                  offsets.offset_PTR_s_isPlaceholderInstall));
-  }
-  {
-    *((uint64_t*)(mutableBytes +
-                  offsets.offset_PTR_s__onQueue_addReferenceForApplication)) =
-    *((uint64_t*)(mutableBytes +
-                  offsets.offset_ptr_str_class));
-  }
-#endif
   uint64_t current_empty_space = offsets.offset_data_const_end_padding;
   uint64_t copied_size = 0;
   uint64_t new_method_list_offset = current_empty_space;
