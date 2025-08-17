@@ -332,6 +332,7 @@ static void grant_full_disk_access_impl(void (^completion)(NSString* extension_t
     completion(nil, [NSError errorWithDomain:@"com.worthdoingbadly.fulldiskaccess"
                                         code:5
                                     userInfo:@{NSLocalizedDescriptionKey : @"Can't patchfind."}]);
+    close(fd);
     return;
   }
 
@@ -345,6 +346,7 @@ static void grant_full_disk_access_impl(void (^completion)(NSString* extension_t
                                NSLocalizedDescriptionKey : @"Can't overwrite file: your device may "
                                                            @"not be vulnerable to CVE-2022-46689."
                              }]);
+    close(fd);
     return;
   }
   munmap(targetMap, targetLength);
@@ -374,6 +376,7 @@ static void grant_full_disk_access_impl(void (^completion)(NSString* extension_t
     }
     completion(extension_token, returnError);
   });
+  close(fd);
 }
 
 void grant_full_disk_access(void (^completion)(NSError* _Nullable)) {
@@ -596,6 +599,7 @@ bool patch_installd() {
   if (!overwrite_file(fd, sourceData)) {
     overwrite_file(fd, originalData);
     munmap(targetMap, targetLength);
+    close(fd);
     NSLog(@"can't overwrite");
     return false;
   }
@@ -606,5 +610,6 @@ bool patch_installd() {
   // TODO(zhuowei): for now we revert it once installd starts
   // so the change will only last until when this installd exits
   overwrite_file(fd, originalData);
+  close(fd);
   return true;
 }

@@ -2,6 +2,10 @@
 #include <string.h>
 #include <mach/mach.h>
 #include <dirent.h>
+#include <unistd.h>
+#ifndef PAGE_SIZE
+#define PAGE_SIZE 4096
+#endif
 
 char* get_temp_file_path(void) {
   return strdup([[NSTemporaryDirectory() stringByAppendingPathComponent:@"AAAAs"] fileSystemRepresentation]);
@@ -20,7 +24,8 @@ char* set_up_tmp_file(void) {
   char* buf = malloc(PAGE_SIZE*10);
   memset(buf, 'A', PAGE_SIZE*10);
   fwrite(buf, PAGE_SIZE*10, 1, f);
-  //fclose(f);
+  free(buf);
+  fclose(f);
   return path;
 }
 
