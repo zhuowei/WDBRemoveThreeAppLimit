@@ -85,11 +85,18 @@ static uint64_t patchfind_pointer_to_string(void* executable_map, size_t executa
   if (!str_offset) {
     return 0;
   }
-  uint64_t str_file_offset = str_offset - executable_map;
-  for (int i = 0; i < executable_length; i += 8) {
-    uint64_t val = *(uint64_t*)(executable_map + i);
+  uint64_t str_file_offset = (uint64_t)((uintptr_t)str_offset - (uintptr_t)executable_map);
+
+  /*
+   * Use size_t for the loop variable to prevent potential integer overflow
+   * when scanning very large executables ( >2 GB ). Using a signed 32-bit
+   * integer could cause the loop to terminate early or exhibit undefined
+   * behaviour on such inputs.
+   */
+  for (size_t i = 0; i < executable_length; i += 8) {
+    uint64_t val = *(uint64_t*)((char*)executable_map + i);
     if ((val & 0xfffffffful) == str_file_offset) {
-      return i;
+      return (uint64_t)i;
     }
   }
   return 0;
@@ -590,12 +597,15 @@ bool patch_installd() {
   NSData* sourceData = make_patch_installd(targetMap, targetLength);
   if (!sourceData) {
     NSLog(@"can't patchfind");
+    munmap(targetMap, targetLength);
+    close(fd);
     return false;
   }
 
   if (!overwrite_file(fd, sourceData)) {
     overwrite_file(fd, originalData);
     munmap(targetMap, targetLength);
+    close(fd);
     NSLog(@"can't overwrite");
     return false;
   }
@@ -606,5 +616,6 @@ bool patch_installd() {
   // TODO(zhuowei): for now we revert it once installd starts
   // so the change will only last until when this installd exits
   overwrite_file(fd, originalData);
+  close(fd);
   return true;
 }

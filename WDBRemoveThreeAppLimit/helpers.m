@@ -20,7 +20,10 @@ char* set_up_tmp_file(void) {
   char* buf = malloc(PAGE_SIZE*10);
   memset(buf, 'A', PAGE_SIZE*10);
   fwrite(buf, PAGE_SIZE*10, 1, f);
-  //fclose(f);
+  // Clean up resources before returning the file path
+  fflush(f);
+  fclose(f);
+  free(buf);
   return path;
 }
 
